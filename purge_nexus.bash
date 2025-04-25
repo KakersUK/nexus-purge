@@ -1,0 +1,88 @@
+#!/bin/bash
+# Purge Nexus
+# Copyright (C) 2024 Sébastien Picavet
+# Copyright (C) 2025 Jamie Scott
+#
+# This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 2 of the License.
+# This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+# See the GNU General Public License for more details.
+# You should have received a copy of the GNU General Public License along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+authCreds=''
+baseURL='http://127.0.0.1:8080'
+reposToMaintain=('release')
+maxVersionCount=3
+CURL_OPTS='--silent'
+
+while getopts ':dv' opt; do
+  case $opt in
+    d)
+      dryRun=true
+      ;;
+    v)
+      CURL_OPTS='--verbose'
+      VERBOSE=true
+      ;;
+    *)
+      echo
+      echo "Usage: $(basename "${0}") [-dv]"
+      echo "options:"
+      echo "d    Dry run"
+      echo "v    verbose output"
+      echo
+      exit 1
+      ;;
+  esac
+done
+
+# Loop through each repository
+for repoName in ${reposToMaintain[@]}
+do
+
+  [ "${VERBOSE}" ] && echo 'Calling Nexus...'
+  jsonResponse=$(curl ${CURL_OPTS} --user "${authCreds}" "${baseURL}/service/rest/v1/components?repository=${repoName}")
+  tokenNext=$(echo "${jsonResponse}" | jq --raw-output '.continuationToken // empty')
+  [ "${VERBOSE}" ] && echo "Next token: ${tokenNext}"
+
+  # Closing, you must read everything because the order is not guaranteed
+  while [ "${tokenNext}" != "" ]
+  do
+    [ "${VERBOSE}" ] && echo 'New iteration'
+
+    jsonResponseNext=$(curl ${CURL_OPTS} --user "${authCreds}" "${baseURL}/service/rest/v1/components?repository=${repoName}&continuationToken=${tokenNext}")
+    tokenNext=$(echo "${jsonResponseNext}" | jq --raw-output '.continuationToken // empty')
+
+    # Concatenate all
+    jsonResponse="${jsonResponse}${jsonResponseNext}"
+
+    [ "${VERBOSE}" ] && echo "Next token? ${tokenNext}"
+  done
+
+  # Explanations : extracting the information we need ; grouping by component ; hack to have a line per couple in order to count and shell a little
+  for i in $(echo "${jsonResponse}" | jq '.items[] | {component: .name, version: .version}' | jq --slurp --compact-output 'group_by(.component)' | sed 's/\],\[/\]\n\[/g' | sed 's/\[\[/\[/' | sed 's/\]\]/\]/')
+  do
+    # More than X versions?
+    if [ $(echo "${i}" | jq 'length') -gt ${maxVersionCount} ]
+    then
+      [ "${VERBOSE}" ] && echo "More than ${maxVersionCount} versions: $(echo ${i} | jq)"
+
+      # Sort versions and exclude last X lines
+      for j in $(echo "${i}" | jq --raw-output '.[].version' | sort --version-sort | head --lines -${maxVersionCount})
+      do
+        echo "Deleting the version ${j} of the component ${componentName}"
+        [ "${VERBOSE}" ] && echo "Deleting files: $(echo "${jsonResponse}" | jq --raw-output '.items[] | select(.name == "'${componentName}'" and .version == "'${j}'") | .assets[].path')"
+
+        for k in $(echo "${jsonResponse}" | jq --raw-output '.items[] | select(.name == "'${componentName}'" and .version == "'${j}'") | .assets[].id')
+        do
+          if [ ${dryRun} ]
+          then
+            echo "curl ${CURL_OPTS} --request DELETE --user ${authCreds}" "${baseURL}/service/rest/v1/assets/${k}"
+          else
+            curl ${CURL_OPTS} --request DELETE --user "${authCreds}" "${baseURL}/service/rest/v1/assets/${k}"
+          fi
+        done
+      done
+    fi
+  done
+
+done

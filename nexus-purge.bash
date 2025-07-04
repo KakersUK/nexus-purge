@@ -59,7 +59,7 @@ do
   done
 
   # Explanations : extracting the information we need ; grouping by component ; hack to have a line per couple in order to count and shell a little
-  for i in $(echo "${jsonResponse}" | jq '.items[] | {component: .name, version: .version}' | jq --slurp --compact-output 'group_by(.component)' | sed 's/\],\[/\]\n\[/g' | sed 's/\[\[/\[/' | sed 's/\]\]/\]/')
+  for i in $(echo "${jsonResponse}" | jq '.items[] | {component: .name, version: .version, id: .id}' | jq --slurp --compact-output 'group_by(.component)' | sed 's/\],\[/\]\n\[/g' | sed 's/\[\[/\[/' | sed 's/\]\]/\]/')
   do
     # More than X versions?
     if [ $(echo "${i}" | jq 'length') -gt ${maxVersionCount} ]
@@ -69,20 +69,19 @@ do
       # Sort versions and exclude last X lines
       for j in $(echo "${i}" | jq --raw-output '.[].version' | sort --version-sort | head --lines -${maxVersionCount})
       do
-        echo "Deleting the version ${j} of the component ${componentName}"
-        [ "${VERBOSE}" ] && echo "Deleting files: $(echo "${jsonResponse}" | jq --raw-output '.items[] | select(.name == "'${componentName}'" and .version == "'${j}'") | .assets[].path')"
+        conponentName=$(echo "${i}" | jq --raw-output '.[0].component')
+        componentID=$(echo "${i}" | jq --raw-output '.[] | select(.version == "'${j}'") | .id')
+        [ "${VERBOSE}" ] && echo "Deleting version ${j} (id: ${assetID}) of component ${conponentName} from ${repoName}"
 
-        for k in $(echo "${jsonResponse}" | jq --raw-output '.items[] | select(.name == "'${componentName}'" and .version == "'${j}'") | .assets[].id')
-        do
-          if [ ${dryRun} ]
-          then
-            echo "curl ${CURL_OPTS} --request DELETE --user ${authCreds}" "${baseURL}/service/rest/v1/assets/${k}"
-          else
-            curl ${CURL_OPTS} --request DELETE --user "${authCreds}" "${baseURL}/service/rest/v1/assets/${k}"
-          fi
-        done
+        # Dry run will simulate the curl command
+        if [ ${dryRun} ]
+        then
+          echo "curl ${CURL_OPTS} --request DELETE --user ${authCreds}" "${baseURL}/service/rest/v1/components/${componentID}"
+        else
+          curl ${CURL_OPTS} --request DELETE --user "${authCreds}" "${baseURL}/service/rest/v1/components/${componentID}"
+        fi
+
       done
     fi
   done
-
 done

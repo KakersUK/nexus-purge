@@ -58,20 +58,20 @@ do
     [ "${VERBOSE}" ] && echo "Next token? ${tokenNext}"
   done
 
-  # Explanations : extracting the information we need ; grouping by component ; hack to have a line per couple in order to count and shell a little
-  for i in $(echo "${jsonResponse}" | jq '.items[] | {component: .name, version: .version, id: .id}' | jq --slurp --compact-output 'group_by(.component)' | sed 's/\],\[/\]\n\[/g' | sed 's/\[\[/\[/' | sed 's/\]\]/\]/')
+  # Extracting the information we need and grouping by component ; hack to have a line per couple in order to count and shell a little
+  for componentArray in $(echo "${jsonResponse}" | jq '.items[] | {component: .name, version: .version, id: .id}' | jq --slurp --compact-output 'group_by(.component)' | sed 's/\],\[/\]\n\[/g' | sed 's/\[\[/\[/' | sed 's/\]\]/\]/')
   do
-    # More than X versions?
-    if [ $(echo "${i}" | jq 'length') -gt ${maxVersionCount} ]
+    # More than X versions of a component?
+    if [ $(echo "${componentArray}" | jq 'length') -gt ${maxVersionCount} ]
     then
-      [ "${VERBOSE}" ] && echo "More than ${maxVersionCount} versions: $(echo ${i} | jq)"
+      [ "${VERBOSE}" ] && echo "More than ${maxVersionCount} versions: $(echo ${componentArray} | jq)"
 
       # Sort versions and exclude last X lines
-      for j in $(echo "${i}" | jq --raw-output '.[].version' | sort --version-sort | head --lines -${maxVersionCount})
+      for versionArray in $(echo "${componentArray}" | jq --raw-output '.[].version' | sort --version-sort | head --lines -${maxVersionCount})
       do
-        conponentName=$(echo "${i}" | jq --raw-output '.[0].component')
-        componentID=$(echo "${i}" | jq --raw-output '.[] | select(.version == "'${j}'") | .id')
-        [ "${VERBOSE}" ] && echo "Deleting version ${j} (id: ${assetID}) of component ${conponentName} from ${repoName}"
+        conponentName=$(echo "${componentArray}" | jq --raw-output '.[0].component')
+        componentID=$(echo "${componentArray}" | jq --raw-output '.[] | select(.version == "'${versionArray}'") | .id')
+        [ "${VERBOSE}" ] && echo "Deleting version ${versionArray} (id: ${assetID}) of component ${conponentName} from ${repoName}"
 
         # Dry run will simulate the curl command
         if [ ${dryRun} ]
